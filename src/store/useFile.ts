@@ -2,6 +2,7 @@ import debounce from "lodash.debounce";
 import { event as gaEvent } from "nextjs-google-analytics";
 import { toast } from "react-hot-toast";
 import { create } from "zustand";
+import type { JSONPath } from "jsonc-parser";
 import exampleJson from "../data/example.json";
 import { FileFormat } from "../enums/file.enum";
 import useGraph from "../features/editor/views/GraphView/stores/useGraph";
@@ -34,6 +35,7 @@ interface JsonActions {
   setFile: (fileData: File) => void;
   setJsonSchema: (jsonSchema: object | null) => void;
   checkEditorSession: (url: Query, widget?: boolean) => void;
+  updateNodeValue: (path: JSONPath, newValue: any) => void;
 }
 
 export type File = {
@@ -154,6 +156,55 @@ const useFile = create<FileStates & JsonActions>()((set, get) => ({
 
     if (format) set({ format });
     get().setContents({ contents, hasChanges: false });
+  },
+  updateNodeValue: (path, newValue) => {
+    try {
+      const currentContents = get().contents;
+      const currentFormat = get().format;
+      
+      // Parse the current JSON content
+      const jsonData = JSON.parse(currentContents);
+      
+      // Navigate to the correct location in the JSON using the path
+      if (path.length === 0) {
+        // Root level update
+        const updatedJson = typeof newValue === 'object' && newValue !== null 
+          ? { ...jsonData, ...newValue } 
+          : newValue;
+        const newContents = JSON.stringify(updatedJson, null, 2);
+        get().setContents({ contents: newContents, hasChanges: true });
+        return;
+      }
+      
+      // Navigate to the parent of the target node
+      let current = jsonData;
+      for (let i = 0; i < path.length - 1; i++) {
+        current = current[path[i]];
+      }
+      
+      // Update the value at the final path segment
+      const lastKey = path[path.length - 1];
+      
+      // If newValue is an object, merge it with existing properties
+      if (typeof newValue === 'object' && newValue !== null && !Array.isArray(newValue)) {
+        if (typeof current[lastKey] === 'object' && current[lastKey] !== null) {
+          current[lastKey] = { ...current[lastKey], ...newValue };
+        } else {
+          current[lastKey] = newValue;
+        }
+      } else {
+        current[lastKey] = newValue;
+      }
+      
+      // Convert back to the original format and update
+      const newContents = JSON.stringify(jsonData, null, 2);
+      get().setContents({ contents: newContents, hasChanges: true });
+      
+      gaEvent("update_node_value");
+    } catch (error) {
+      console.error("Error updating node value:", error);
+      throw error;
+    }
   },
 }));
 
